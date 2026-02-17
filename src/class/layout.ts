@@ -151,7 +151,7 @@ export async function layoutClassDiagram(
   })
 
   // 5. Extract relationship paths and label positions
-  const relationships: PositionedClassRelationship[] = g.edges().map(edgeObj => {
+  const relationships: PositionedClassRelationship[] = g.edges().map((edgeObj: { v: string; w: string }) => {
     const dagreEdge = g.edge(edgeObj)
     const rel = diagram.relationships[dagreEdge._index as number]!
     const rawPoints = dagreEdge.points ?? []

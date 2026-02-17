@@ -301,7 +301,7 @@ export function layoutSequenceDiagram(
   const diagramBottom = messageY + SEQ.padding
 
   // Find global X extents across actors, blocks, and notes
-  let globalMinX = SEQ.padding // actors already start at SEQ.padding
+  let globalMinX: number = SEQ.padding // actors already start at SEQ.padding
   let globalMaxX = 0
   for (const a of actors) {
     globalMinX = Math.min(globalMinX, a.x - a.width / 2)

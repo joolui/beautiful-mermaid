@@ -546,13 +546,13 @@ describe('sequence layout – note bounding box', () => {
 
     // Each message's x1/x2 should match its from/to actor center X
     for (const msg of result.messages) {
-      expect(msg.x1).toBe(actorX.get(msg.from))
-      expect(msg.x2).toBe(actorX.get(msg.to))
+      expect(msg.x1).toBe(actorX.get(msg.from)!)
+      expect(msg.x2).toBe(actorX.get(msg.to)!)
     }
 
     // Lifelines should align with their actors
     for (const ll of result.lifelines) {
-      expect(ll.x).toBe(actorX.get(ll.actorId))
+      expect(ll.x).toBe(actorX.get(ll.actorId)!)
     }
   })
 
