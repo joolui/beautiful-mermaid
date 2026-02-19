@@ -376,8 +376,9 @@ describe('renderSvg – groups', () => {
     }
     const graph = makeGraph({ groups: [group] })
     const svg = renderSvg(graph, lightColors)
-    const rectCount = (svg.match(/x="20" y="20"/g) ?? []).length
-    expect(rectCount).toBeGreaterThanOrEqual(2)
+    // Outer rectangle (rounded corners) + header band (path with rounded top corners)
+    expect(svg).toMatch(/rect.*x="20".*y="20"/)
+    expect(svg).toMatch(/<path.*d="M/)
     expect(svg).toContain('>Backend</text>')
   })
 

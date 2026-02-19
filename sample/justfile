@@ -1,0 +1,9 @@
+# Generate SVG and TXT diagrams from .mmd files in src/
+
+# Render all diagrams once
+render:
+    node render.mjs
+
+# Render and watch for changes
+watch:
+    node render.mjs --watch

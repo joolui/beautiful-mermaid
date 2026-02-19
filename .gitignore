@@ -11,9 +11,11 @@ index.html
 # IDE
 .idea/
 .vscode/
+.claude/
 *.swp
 *.swo
 .DS_Store
+logs/
 
 # Logs
 *.log
@@ -23,6 +25,7 @@ npm-debug.log*
 .env
 .env.local
 .env.*.local
+
 
 # Test coverage
 coverage/

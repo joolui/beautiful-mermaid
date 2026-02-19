@@ -221,6 +221,74 @@ export function fromShikiTheme(theme: ShikiThemeLike): DiagramColors {
 }
 
 // ============================================================================
+// Color utilities — hex parsing, RGB mixing, luminance detection
+//
+// Used by the renderer for depth-aware tinting and shadow color computation.
+// These operate on concrete hex values (not CSS variables) so they can produce
+// inline style values for elements that need per-instance colors.
+// ============================================================================
+
+/** Parse a hex color (#RGB, #RRGGBB, or #RRGGBBAA) into [r, g, b] (0-255) */
+export function parseHex(hex: string): [number, number, number] {
+  const h = hex.replace('#', '')
+  if (h.length === 3) {
+    return [
+      parseInt(h[0]! + h[0], 16),
+      parseInt(h[1]! + h[1], 16),
+      parseInt(h[2]! + h[2], 16),
+    ]
+  }
+  return [
+    parseInt(h.slice(0, 2), 16),
+    parseInt(h.slice(2, 4), 16),
+    parseInt(h.slice(4, 6), 16),
+  ]
+}
+
+/** Convert [r, g, b] back to a #RRGGBB hex string */
+export function toHex(r: number, g: number, b: number): string {
+  const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v)))
+  return '#' + [clamp(r), clamp(g), clamp(b)].map(v => v.toString(16).padStart(2, '0')).join('')
+}
+
+/** Mix fg into bg at a given percentage (0-100). Matches CSS color-mix(in srgb) behavior. */
+export function mixColors(bg: string, fg: string, pct: number): string {
+  const [br, bg2, bb] = parseHex(bg)
+  const [fr, fg2, fb] = parseHex(fg)
+  const t = pct / 100
+  return toHex(
+    br + (fr - br) * t,
+    bg2 + (fg2 - bg2) * t,
+    bb + (fb - bb) * t,
+  )
+}
+
+/** Returns true if the background color is dark (luminance < 128) */
+export function isDark(bg: string): boolean {
+  const [r, g, b] = parseHex(bg)
+  return (r * 299 + g * 587 + b * 114) / 1000 < 128
+}
+
+/** Compute shadow color: fg at low opacity, stronger for dark themes */
+export function computeShadowColor(colors: DiagramColors): string {
+  const [r, g, b] = parseHex(colors.fg)
+  const opacity = isDark(colors.bg) ? 0.35 : 0.12
+  return `rgba(${r},${g},${b},${opacity})`
+}
+
+/** Compute the group fill color at a given nesting depth */
+export function computeDepthFill(colors: DiagramColors, depth: number): string {
+  const pct = Math.min(depth * 3, 15)
+  return mixColors(colors.bg, colors.fg, pct)
+}
+
+/** Compute the group header fill color at a given nesting depth */
+export function computeDepthHeaderFill(colors: DiagramColors, depth: number): string {
+  const pct = Math.min(depth * 3 + MIX.groupHeader, 20)
+  return mixColors(colors.bg, colors.fg, pct)
+}
+
+// ============================================================================
 // SVG style block — the CSS variable derivation system
 //
 // Generates the <style> content that maps user-facing variables (--bg, --fg,

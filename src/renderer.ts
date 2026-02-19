@@ -1,7 +1,7 @@
 import type { PositionedGraph, PositionedNode, PositionedEdge, PositionedGroup, Point } from './types.ts'
 import type { DiagramColors } from './theme.ts'
-import { svgOpenTag, buildStyleBlock } from './theme.ts'
-import { FONT_SIZES, FONT_WEIGHTS, STROKE_WIDTHS, ARROW_HEAD, estimateTextWidth, TEXT_BASELINE_SHIFT, LINE_HEIGHT_RATIO, wrapText } from './styles.ts'
+import { svgOpenTag, buildStyleBlock, computeShadowColor, computeDepthFill, computeDepthHeaderFill } from './theme.ts'
+import { FONT_SIZES, FONT_WEIGHTS, STROKE_WIDTHS, ARROW_HEAD, estimateTextWidth, TEXT_BASELINE_SHIFT, LINE_HEIGHT_RATIO, wrapText, GROUP_CORNER_RADIUS, groupStrokeWidth, groupShadowId } from './styles.ts'
 
 // ============================================================================
 // SVG renderer — converts a PositionedGraph into an SVG string.
@@ -15,8 +15,9 @@ import { FONT_SIZES, FONT_WEIGHTS, STROKE_WIDTHS, ARROW_HEAD, estimateTextWidth,
 // <svg> tag. See src/theme.ts for the full variable system.
 //
 // Style spec:
-// - All corners rx=0 ry=0 (sharp)
-// - Stroke widths: outer box 1px, inner box 0.75px, connectors 0.75px
+// - Groups: rounded corners (rx=8), depth-tinted fills, graduated strokes, drop shadows
+// - Nodes: sharp corners (rx=0), subtle drop shadow
+// - Stroke widths: groups graduated by depth (1.5/1/0.75), nodes 1px, connectors 0.75px
 // - Arrow heads: filled triangles, 8px wide × 4.8px tall
 // - Dashed edges: stroke-dasharray="4 4"
 // - Font: Inter with weight per element type
@@ -41,13 +42,15 @@ export function renderSvg(
   // SVG root with CSS variables + style block + defs
   parts.push(svgOpenTag(graph.width, graph.height, colors, transparent))
   parts.push(buildStyleBlock(font, false))
+  const shadowColor = computeShadowColor(colors)
   parts.push('<defs>')
   parts.push(arrowMarkerDefs())
+  parts.push(shadowFilterDefs(shadowColor))
   parts.push('</defs>')
 
   // 1. Group backgrounds (subgraph rectangles with header bands)
   for (const group of graph.groups) {
-    parts.push(renderGroup(group, font))
+    parts.push(renderGroup(group, font, colors, 0))
   }
 
   // 2. Edges (polylines — rendered behind nodes)
@@ -102,23 +105,51 @@ function arrowMarkerDefs(): string {
 }
 
 // ============================================================================
+// Shadow filter definitions
+// ============================================================================
+
+function shadowFilterDefs(shadowColor: string): string {
+  return (
+    `  <filter id="shadow-sm" x="-5%" y="-5%" width="115%" height="120%">` +
+    `\n    <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="${shadowColor}" flood-opacity="1" />` +
+    `\n  </filter>` +
+    `\n  <filter id="shadow-md" x="-5%" y="-5%" width="115%" height="120%">` +
+    `\n    <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="${shadowColor}" flood-opacity="1" />` +
+    `\n  </filter>` +
+    `\n  <filter id="shadow-lg" x="-5%" y="-5%" width="115%" height="120%">` +
+    `\n    <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="${shadowColor}" flood-opacity="1" />` +
+    `\n  </filter>`
+  )
+}
+
+// ============================================================================
 // Group rendering (subgraph backgrounds)
 // ============================================================================
 
-function renderGroup(group: PositionedGroup, font: string): string {
+function renderGroup(group: PositionedGroup, font: string, colors: DiagramColors, depth: number): string {
   const headerHeight = FONT_SIZES.groupHeader + 16
+  const r = GROUP_CORNER_RADIUS
+  const sw = groupStrokeWidth(depth)
+  const shadow = groupShadowId(depth)
+  const fillColor = computeDepthFill(colors, depth)
+  const hdrColor = computeDepthHeaderFill(colors, depth)
   const parts: string[] = []
 
-  // Outer rectangle
+  // Outer rectangle with rounded corners and depth-aware shadow
   parts.push(
     `<rect x="${group.x}" y="${group.y}" width="${group.width}" height="${group.height}" ` +
-    `rx="0" ry="0" fill="var(--_group-fill)" stroke="var(--_node-stroke)" stroke-width="${STROKE_WIDTHS.outerBox}" />`
+    `rx="${r}" ry="${r}" fill="${fillColor}" stroke="var(--_node-stroke)" stroke-width="${sw}" ` +
+    `filter="url(#${shadow})" />`
   )
 
-  // Header band
+  // Header band — path with rounded top corners, flat bottom
+  const hx = group.x
+  const hy = group.y
+  const hw = group.width
+  const hh = headerHeight
   parts.push(
-    `<rect x="${group.x}" y="${group.y}" width="${group.width}" height="${headerHeight}" ` +
-    `rx="0" ry="0" fill="var(--_group-hdr)" stroke="var(--_node-stroke)" stroke-width="${STROKE_WIDTHS.outerBox}" />`
+    `<path d="M${hx + r},${hy} h${hw - 2 * r} a${r},${r} 0 0 1 ${r},${r} v${hh - r} h${-hw} v${-(hh - r)} a${r},${r} 0 0 1 ${r},${-r} Z" ` +
+    `fill="${hdrColor}" stroke="var(--_node-stroke)" stroke-width="${sw}" />`
   )
 
   // Header label
@@ -128,9 +159,9 @@ function renderGroup(group: PositionedGroup, font: string): string {
     `fill="var(--_text-sec)">${escapeXml(group.label)}</text>`
   )
 
-  // Render nested groups recursively
+  // Render nested groups recursively with incremented depth
   for (const child of group.children) {
-    parts.push(renderGroup(child, font))
+    parts.push(renderGroup(child, font, colors, depth + 1))
   }
 
   return parts.join('\n')
@@ -200,7 +231,8 @@ function renderEdgeLabel(edge: PositionedEdge, font: string): string {
   return (
     `<rect x="${mid.x - bgWidth / 2}" y="${mid.y - bgHeight / 2}" ` +
     `width="${bgWidth}" height="${bgHeight}" rx="4" ry="4" ` +
-    `fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" />\n` +
+    `fill="var(--bg)" stroke="var(--_inner-stroke)" stroke-width="0.5" ` +
+    `filter="url(#shadow-sm)" />\n` +
     textContent
   )
 }
@@ -251,37 +283,40 @@ function renderNodeShape(node: PositionedNode): string {
   const stroke = escapeXml(inlineStyle?.stroke ?? 'var(--_node-stroke)')
   const sw = escapeXml(inlineStyle?.['stroke-width'] ?? String(STROKE_WIDTHS.innerBox))
 
+  let shapeContent: string
   switch (shape) {
     case 'diamond':
-      return renderDiamond(x, y, width, height, fill, stroke, sw)
+      shapeContent = renderDiamond(x, y, width, height, fill, stroke, sw); break
     case 'rounded':
-      return renderRoundedRect(x, y, width, height, fill, stroke, sw)
+      shapeContent = renderRoundedRect(x, y, width, height, fill, stroke, sw); break
     case 'stadium':
-      return renderStadium(x, y, width, height, fill, stroke, sw)
+      shapeContent = renderStadium(x, y, width, height, fill, stroke, sw); break
     case 'circle':
-      return renderCircle(x, y, width, height, fill, stroke, sw)
+      shapeContent = renderCircle(x, y, width, height, fill, stroke, sw); break
     case 'subroutine':
-      return renderSubroutine(x, y, width, height, fill, stroke, sw)
+      shapeContent = renderSubroutine(x, y, width, height, fill, stroke, sw); break
     case 'doublecircle':
-      return renderDoubleCircle(x, y, width, height, fill, stroke, sw)
+      shapeContent = renderDoubleCircle(x, y, width, height, fill, stroke, sw); break
     case 'hexagon':
-      return renderHexagon(x, y, width, height, fill, stroke, sw)
+      shapeContent = renderHexagon(x, y, width, height, fill, stroke, sw); break
     case 'cylinder':
-      return renderCylinder(x, y, width, height, fill, stroke, sw)
+      shapeContent = renderCylinder(x, y, width, height, fill, stroke, sw); break
     case 'asymmetric':
-      return renderAsymmetric(x, y, width, height, fill, stroke, sw)
+      shapeContent = renderAsymmetric(x, y, width, height, fill, stroke, sw); break
     case 'trapezoid':
-      return renderTrapezoid(x, y, width, height, fill, stroke, sw)
+      shapeContent = renderTrapezoid(x, y, width, height, fill, stroke, sw); break
     case 'trapezoid-alt':
-      return renderTrapezoidAlt(x, y, width, height, fill, stroke, sw)
+      shapeContent = renderTrapezoidAlt(x, y, width, height, fill, stroke, sw); break
     case 'state-start':
       return renderStateStart(x, y, width, height)
     case 'state-end':
       return renderStateEnd(x, y, width, height)
     case 'rectangle':
     default:
-      return renderRect(x, y, width, height, fill, stroke, sw)
+      shapeContent = renderRect(x, y, width, height, fill, stroke, sw); break
   }
+
+  return `<g filter="url(#shadow-sm)">${shapeContent}</g>`
 }
 
 // --- Basic shapes ---

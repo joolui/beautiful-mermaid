@@ -1,0 +1,8 @@
+{
+  "name": "diagrams",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "beautiful-mermaid": "file:.."
+  }
+}

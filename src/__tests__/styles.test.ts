@@ -170,7 +170,7 @@ describe('constants', () => {
 
   it('STROKE_WIDTHS has expected values', () => {
     expect(STROKE_WIDTHS.outerBox).toBe(1)
-    expect(STROKE_WIDTHS.innerBox).toBe(0.75)
+    expect(STROKE_WIDTHS.innerBox).toBe(1)
     expect(STROKE_WIDTHS.connector).toBe(0.75)
   })
 

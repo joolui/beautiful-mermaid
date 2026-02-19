@@ -68,9 +68,26 @@ export const NODE_PADDING = {
 /** Stroke widths per element type (in px) */
 export const STROKE_WIDTHS = {
   outerBox: 1,
-  innerBox: 0.75,
+  innerBox: 1,
   connector: 0.75,
 } as const
+
+/** Corner radius for group (subgraph) rectangles */
+export const GROUP_CORNER_RADIUS = 8
+
+/** Return the group stroke width for a given nesting depth */
+export function groupStrokeWidth(depth: number): number {
+  if (depth === 0) return 1.5
+  if (depth === 1) return 1
+  return 0.75
+}
+
+/** Shadow filter ID for a given nesting depth */
+export function groupShadowId(depth: number): string {
+  if (depth === 0) return 'shadow-lg'
+  if (depth === 1) return 'shadow-md'
+  return 'shadow-sm'
+}
 
 /**
  * Vertical shift applied to all text elements for font-agnostic centering.
