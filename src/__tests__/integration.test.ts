@@ -633,3 +633,23 @@ describe('renderMermaid – group overlap', () => {
     }
   })
 })
+
+// ============================================================================
+// Multi-line node padding
+// ============================================================================
+
+describe('renderMermaid – multi-line node padding', () => {
+  it('multi-line nodes have sufficient vertical padding', async () => {
+    const svg = await renderMermaid(`graph TD
+      A["Line One<br/>Line Two<br/>Line Three"]`)
+
+    // Extract node rect height (nodes have rx="0", groups have rx="8")
+    const nodeRects = [...svg.matchAll(/height="([^"]+)" rx="0"/g)]
+    expect(nodeRects.length).toBeGreaterThanOrEqual(1)
+    const height = parseFloat(nodeRects[0]![1]!)
+
+    // 3 lines at 13px * 1.4 line-height = 54.6px text height
+    // Should have at least 12px padding top + bottom = 24px extra
+    expect(height).toBeGreaterThanOrEqual(54.6 + 24)
+  })
+})

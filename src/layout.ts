@@ -414,8 +414,13 @@ function estimateNodeSize(id: string, label: string, shape: string): { width: nu
     Math.max(max, estimateTextWidth(line, FONT_SIZES.nodeLabel, FONT_WEIGHTS.nodeLabel)), 0)
   const textHeight = lines.length * FONT_SIZES.nodeLabel * LINE_HEIGHT_RATIO
 
+  // Scale vertical padding for multi-line nodes to avoid cramped appearance
+  const verticalPad = lines.length > 2
+    ? NODE_PADDING.vertical * 1.5
+    : NODE_PADDING.vertical
+
   let width = widestLine + NODE_PADDING.horizontal * 2
-  let height = textHeight + NODE_PADDING.vertical * 2
+  let height = textHeight + verticalPad * 2
 
   // Diamonds need extra space because text is inside a rotated square
   if (shape === 'diamond') {
@@ -913,15 +918,21 @@ function expandGroupForHeader(group: PositionedGroup, headerHeight: number): voi
     expandGroupForHeader(child, headerHeight)
   }
 
-  // Step 2: re-fit bounds to encompass expanded children.
+  // Step 2: re-fit bounds to encompass expanded children with padding.
   // After children expand upward, they may extend above this group's dagre-computed top.
   if (group.children.length > 0) {
+    let minX = group.x
+    let maxX = group.x + group.width
     let minY = group.y
     let maxY = group.y + group.height
     for (const child of group.children) {
+      minX = Math.min(minX, child.x - GROUP_CONTENT_PADDING)
+      maxX = Math.max(maxX, child.x + child.width + GROUP_CONTENT_PADDING)
       minY = Math.min(minY, child.y)
-      maxY = Math.max(maxY, child.y + child.height)
+      maxY = Math.max(maxY, child.y + child.height + GROUP_CONTENT_PADDING)
     }
+    group.x = minX
+    group.width = maxX - minX
     group.height = maxY - minY
     group.y = minY
   }
@@ -1074,20 +1085,31 @@ function resolveItemOverlaps(
   }
 }
 
+/** Minimum padding between a group's border and its innermost content (px). */
+const GROUP_CONTENT_PADDING = 12
+
 /** Re-fit a group's bounds to encompass its children AND loose nodes. */
 function refitGroupToContents(group: PositionedGroup, looseNodes: PositionedNode[]): void {
+  let minX = group.x
+  let maxX = group.x + group.width
   let minY = group.y
   let maxY = group.y + group.height
 
   for (const child of group.children) {
+    minX = Math.min(minX, child.x - GROUP_CONTENT_PADDING)
+    maxX = Math.max(maxX, child.x + child.width + GROUP_CONTENT_PADDING)
     minY = Math.min(minY, child.y)
-    maxY = Math.max(maxY, child.y + child.height)
+    maxY = Math.max(maxY, child.y + child.height + GROUP_CONTENT_PADDING)
   }
   for (const node of looseNodes) {
+    minX = Math.min(minX, node.x - GROUP_CONTENT_PADDING)
+    maxX = Math.max(maxX, node.x + node.width + GROUP_CONTENT_PADDING)
     minY = Math.min(minY, node.y)
-    maxY = Math.max(maxY, node.y + node.height)
+    maxY = Math.max(maxY, node.y + node.height + GROUP_CONTENT_PADDING)
   }
 
+  group.x = minX
+  group.width = maxX - minX
   group.y = minY
   group.height = maxY - minY
 }
