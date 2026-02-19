@@ -106,7 +106,7 @@ export const TEXT_BASELINE_SHIFT = '0.35em' as const
 export const LINE_HEIGHT_RATIO = 1.4
 
 /** Maximum label width in px before auto-wrapping at word boundaries */
-export const MAX_LABEL_WIDTH = 200
+export const MAX_LABEL_WIDTH = 280
 
 /**
  * Wrap text into multiple lines:

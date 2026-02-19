@@ -183,8 +183,8 @@ describe('constants', () => {
     expect(LINE_HEIGHT_RATIO).toBe(1.4)
   })
 
-  it('MAX_LABEL_WIDTH is 200', () => {
-    expect(MAX_LABEL_WIDTH).toBe(200)
+  it('MAX_LABEL_WIDTH is 280', () => {
+    expect(MAX_LABEL_WIDTH).toBe(280)
   })
 })
 

@@ -346,3 +346,37 @@ describe('snapToOrthogonal + clipEndpointsToNodes pipeline', () => {
     ).toBe(true)
   })
 })
+
+// ============================================================================
+// snapToOrthogonal — edge routing artifacts
+// ============================================================================
+
+describe('snapToOrthogonal – edge routing artifacts', () => {
+  it('snaps near-horizontal segments with fractional drift', () => {
+    // Simulates dagre output where y values drift by < 1px across a long edge
+    const points = [
+      { x: 287.85, y: 353.548 },
+      { x: 1289.52, y: 353.412 },
+    ]
+    const result = snapToOrthogonal(points, true)
+    // Y values should be identical (snapped to horizontal)
+    const ys = result.map(p => p.y)
+    expect(Math.abs(ys[ys.length - 1]! - ys[0]!)).toBeLessThan(0.01)
+  })
+
+  it('eliminates near-zero final segments', () => {
+    const points = [
+      { x: 100, y: 100 },
+      { x: 100, y: 200 },
+      { x: 200, y: 200 },
+      { x: 200, y: 203 }, // 3px final segment
+    ]
+    const result = snapToOrthogonal(points, true)
+    // The near-zero segment should be absorbed
+    const lastTwo = result.slice(-2)
+    const finalDy = Math.abs(lastTwo[1]!.y - lastTwo[0]!.y)
+    const finalDx = Math.abs(lastTwo[1]!.x - lastTwo[0]!.x)
+    // Final segment should be meaningful (> 5px) in at least one axis
+    expect(Math.max(finalDx, finalDy)).toBeGreaterThan(5)
+  })
+})

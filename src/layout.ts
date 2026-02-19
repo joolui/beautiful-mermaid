@@ -792,6 +792,7 @@ function extractPositionedGraph(
   // ---------------------------------------------------------------------------
   const headerHeight = FONT_SIZES.groupHeader + 16
   expandGroupsForHeaders(groups, headerHeight)
+  separateSiblingGroups(groups, nodes, edges, graph.subgraphs)
 
   // After expanding groups upward, some may extend above dagre's original margins.
   // Compute the global minimum Y and shift everything down uniformly if needed.
@@ -912,6 +913,244 @@ function expandGroupForHeader(group: PositionedGroup, headerHeight: number): voi
     const expansion = headerHeight + GROUP_HEADER_CONTENT_PAD
     group.y -= expansion
     group.height += expansion
+  }
+}
+
+// ============================================================================
+// Sibling separation post-processing
+//
+// After expandGroupsForHeaders, sibling items (child groups AND loose nodes)
+// at the same nesting level may overlap vertically. This pass detects 2D
+// overlaps and shifts items downward to restore separation.
+//
+// "Loose nodes" are nodes directly declared in a subgraph but not inside any
+// of its child subgroups (e.g., A1 in Attachments but not in KB/LLM/Classification).
+// ============================================================================
+
+/**
+ * Ensure sibling items (groups + loose nodes) at the same nesting level don't overlap.
+ * Processes depth-first: resolve overlaps within each group, re-fit bounds,
+ * then resolve overlaps at the current level.
+ */
+function separateSiblingGroups(
+  groups: PositionedGroup[],
+  nodes: PositionedNode[],
+  edges: PositionedEdge[],
+  subgraphs: MermaidSubgraph[],
+  minGap: number = 8,
+): void {
+  // Build map: group ID → direct node IDs (not including descendant subgraphs' nodes)
+  const directNodeIds = new Map<string, string[]>()
+  for (const sg of subgraphs) {
+    buildDirectNodeIdMap(sg, directNodeIds)
+  }
+
+  resolveSiblingOverlaps(groups, nodes, edges, directNodeIds, minGap)
+}
+
+function buildDirectNodeIdMap(sg: MermaidSubgraph, map: Map<string, string[]>): void {
+  map.set(sg.id, sg.nodeIds)
+  for (const child of sg.children) {
+    buildDirectNodeIdMap(child, map)
+  }
+}
+
+function resolveSiblingOverlaps(
+  siblings: PositionedGroup[],
+  allNodes: PositionedNode[],
+  allEdges: PositionedEdge[],
+  directNodeIds: Map<string, string[]>,
+  minGap: number,
+): void {
+  // Step 1: Recursively process inside each group
+  for (const group of siblings) {
+    // Resolve overlaps among this group's children first
+    if (group.children.length > 0) {
+      resolveSiblingOverlaps(group.children, allNodes, allEdges, directNodeIds, minGap)
+    }
+
+    // Then resolve overlaps between this group's child groups AND loose nodes
+    const looseIds = new Set(directNodeIds.get(group.id) ?? [])
+    const looseNodes = allNodes.filter(n => looseIds.has(n.id))
+    resolveItemOverlaps(group.children, looseNodes, allNodes, allEdges, minGap)
+
+    // Re-fit group bounds to encompass everything inside
+    refitGroupToContents(group, looseNodes)
+  }
+
+  // Step 2: Fix overlaps between siblings at the current level
+  if (siblings.length < 2) return
+
+  const sorted = [...siblings].sort((a, b) => a.y - b.y)
+
+  for (let i = 1; i < sorted.length; i++) {
+    const curr = sorted[i]!
+    let maxRequiredY = curr.y
+
+    for (let j = 0; j < i; j++) {
+      const prev = sorted[j]!
+      const overlapX = prev.x < curr.x + curr.width && prev.x + prev.width > curr.x
+      if (!overlapX) continue
+
+      const requiredY = prev.y + prev.height + minGap
+      maxRequiredY = Math.max(maxRequiredY, requiredY)
+    }
+
+    const neededShift = maxRequiredY - curr.y
+    if (neededShift > 0) {
+      shiftGroupAndContents(curr, neededShift, allNodes, allEdges)
+    }
+  }
+}
+
+/**
+ * Resolve 2D overlaps among a unified set of items (child groups + loose nodes)
+ * at the same nesting level inside a parent group.
+ */
+function resolveItemOverlaps(
+  childGroups: PositionedGroup[],
+  looseNodes: PositionedNode[],
+  allNodes: PositionedNode[],
+  allEdges: PositionedEdge[],
+  minGap: number,
+): void {
+  type Item =
+    | { kind: 'group'; ref: PositionedGroup }
+    | { kind: 'node'; ref: PositionedNode }
+
+  const items: Item[] = [
+    ...childGroups.map(g => ({ kind: 'group' as const, ref: g })),
+    ...looseNodes.map(n => ({ kind: 'node' as const, ref: n })),
+  ]
+
+  if (items.length < 2) return
+
+  // Sort by y position (top to bottom)
+  items.sort((a, b) => a.ref.y - b.ref.y)
+
+  for (let i = 1; i < items.length; i++) {
+    const curr = items[i]!
+    let maxRequiredY = curr.ref.y
+
+    for (let j = 0; j < i; j++) {
+      const prev = items[j]!
+      const overlapX = prev.ref.x < curr.ref.x + curr.ref.width &&
+                        prev.ref.x + prev.ref.width > curr.ref.x
+      if (!overlapX) continue
+
+      const requiredY = prev.ref.y + prev.ref.height + minGap
+      maxRequiredY = Math.max(maxRequiredY, requiredY)
+    }
+
+    const neededShift = maxRequiredY - curr.ref.y
+    if (neededShift > 0) {
+      if (curr.kind === 'group') {
+        shiftGroupAndContents(curr.ref, neededShift, allNodes, allEdges)
+      } else {
+        shiftNodeAndEdges(curr.ref, neededShift, allEdges)
+      }
+    }
+  }
+}
+
+/** Re-fit a group's bounds to encompass its children AND loose nodes. */
+function refitGroupToContents(group: PositionedGroup, looseNodes: PositionedNode[]): void {
+  let minY = group.y
+  let maxY = group.y + group.height
+
+  for (const child of group.children) {
+    minY = Math.min(minY, child.y)
+    maxY = Math.max(maxY, child.y + child.height)
+  }
+  for (const node of looseNodes) {
+    minY = Math.min(minY, node.y)
+    maxY = Math.max(maxY, node.y + node.height)
+  }
+
+  group.y = minY
+  group.height = maxY - minY
+}
+
+/**
+ * Shift a group and all its contents (child groups, nodes, edge points)
+ * downward by `dy` pixels.
+ */
+function shiftGroupAndContents(
+  group: PositionedGroup,
+  dy: number,
+  allNodes: PositionedNode[],
+  allEdges: PositionedEdge[],
+): void {
+  // Capture pre-shift bounds for position-based node/edge ownership
+  const origX = group.x
+  const origY = group.y
+  const origRight = group.x + group.width
+  const origBottom = group.y + group.height
+
+  // Shift all group rects (this group + all descendants)
+  shiftGroupRects(group, dy)
+
+  // Shift nodes whose center falls within the pre-shift group bounds
+  for (const node of allNodes) {
+    const cx = node.x + node.width / 2
+    const cy = node.y + node.height / 2
+    if (cx >= origX && cx <= origRight && cy >= origY && cy <= origBottom) {
+      node.y += dy
+    }
+  }
+
+  // Shift edge points within pre-shift group bounds
+  for (const edge of allEdges) {
+    for (const point of edge.points) {
+      if (point.x >= origX && point.x <= origRight &&
+          point.y >= origY && point.y <= origBottom) {
+        point.y += dy
+      }
+    }
+    if (edge.labelPosition &&
+        edge.labelPosition.x >= origX && edge.labelPosition.x <= origRight &&
+        edge.labelPosition.y >= origY && edge.labelPosition.y <= origBottom) {
+      edge.labelPosition.y += dy
+    }
+  }
+}
+
+/**
+ * Shift a loose node and any edge points near it downward by `dy` pixels.
+ */
+function shiftNodeAndEdges(
+  node: PositionedNode,
+  dy: number,
+  allEdges: PositionedEdge[],
+): void {
+  const origX = node.x
+  const origY = node.y
+  const origRight = node.x + node.width
+  const origBottom = node.y + node.height
+
+  node.y += dy
+
+  // Shift edge points within the node's pre-shift bounding box
+  for (const edge of allEdges) {
+    for (const point of edge.points) {
+      if (point.x >= origX && point.x <= origRight &&
+          point.y >= origY && point.y <= origBottom) {
+        point.y += dy
+      }
+    }
+    if (edge.labelPosition &&
+        edge.labelPosition.x >= origX && edge.labelPosition.x <= origRight &&
+        edge.labelPosition.y >= origY && edge.labelPosition.y <= origBottom) {
+      edge.labelPosition.y += dy
+    }
+  }
+}
+
+/** Shift a group rect and all its descendant group rects by dy. */
+function shiftGroupRects(group: PositionedGroup, dy: number): void {
+  group.y += dy
+  for (const child of group.children) {
+    shiftGroupRects(child, dy)
   }
 }
 

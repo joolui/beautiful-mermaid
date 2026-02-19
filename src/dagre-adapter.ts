@@ -108,9 +108,17 @@ export function snapToOrthogonal(points: Point[], verticalFirst = true): Point[]
     const dx = Math.abs(curr.x - prev.x)
     const dy = Math.abs(curr.y - prev.y)
 
-    // If already axis-aligned (or close enough), keep as-is
-    if (dx < 1 || dy < 1) {
-      result.push(curr)
+    // If already axis-aligned (or close enough), keep as-is.
+    // Threshold of 2px catches accumulated float drift across long edges
+    // (dagre can produce ~0.14px drift over 1000px horizontal spans).
+    if (dx < 2 || dy < 2) {
+      if (dx < 2) {
+        // Near-vertical: snap x to match previous point
+        result.push({ x: prev.x, y: curr.y })
+      } else {
+        // Near-horizontal: snap y to match previous point
+        result.push({ x: curr.x, y: prev.y })
+      }
       continue
     }
 
@@ -128,7 +136,8 @@ export function snapToOrthogonal(points: Point[], verticalFirst = true): Point[]
   // Eliminate collinear points — if three consecutive points share the same x
   // (vertical segment) or same y (horizontal segment), the middle point is
   // redundant and creates visual artifacts at polyline corners.
-  return removeCollinear(result)
+  // Then remove near-zero stub segments at endpoints.
+  return cleanupShortSegments(removeCollinear(result))
 }
 
 /** Remove middle points from three-in-a-row collinear sequences. */
@@ -147,6 +156,43 @@ function removeCollinear(pts: Point[]): Point[] {
   }
   out.push(pts[pts.length - 1]!)
   return out
+}
+
+/**
+ * Remove segments shorter than minLength by merging into adjacent segments.
+ * Eliminates near-zero stubs at edge endpoints (e.g., 3px final segments
+ * before arrowheads) that create visual noise.
+ */
+function cleanupShortSegments(pts: Point[], minLength: number = 5): Point[] {
+  if (pts.length < 3) return pts
+
+  const result = [...pts]
+
+  // Clean from the end: if last segment is too short, drop the penultimate point
+  while (result.length >= 3) {
+    const last = result[result.length - 1]!
+    const prev = result[result.length - 2]!
+    const segLen = Math.abs(last.x - prev.x) + Math.abs(last.y - prev.y)
+    if (segLen < minLength) {
+      result.splice(result.length - 2, 1)
+    } else {
+      break
+    }
+  }
+
+  // Clean from the start: if first segment is too short, drop the second point
+  while (result.length >= 3) {
+    const first = result[0]!
+    const next = result[1]!
+    const segLen = Math.abs(next.x - first.x) + Math.abs(next.y - first.y)
+    if (segLen < minLength) {
+      result.splice(1, 1)
+    } else {
+      break
+    }
+  }
+
+  return result
 }
 
 /**

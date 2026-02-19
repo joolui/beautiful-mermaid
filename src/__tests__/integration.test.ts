@@ -528,3 +528,108 @@ describe('renderMermaid – all shapes combined', () => {
     expect(svg).toContain('</svg>')
   })
 })
+
+// ============================================================================
+// Node sizing
+// ============================================================================
+
+describe('renderMermaid – node sizing', () => {
+  it('label with br wraps to 2 lines not 3 when text fits wider box', async () => {
+    // The second line "Nova Pro + Claude Haiku + Claude Sonnet" should fit
+    // in one line at MAX_LABEL_WIDTH=250, avoiding unnecessary 3-line wrap.
+    const svg = await renderMermaid(`graph TD
+      L4["5D: Multi-Model<br/>Nova Pro + Claude Haiku + Claude Sonnet"]`)
+
+    const tspanCount = (svg.match(/<tspan/g) ?? []).length
+    expect(tspanCount).toBeLessThanOrEqual(2)
+  })
+})
+
+// ============================================================================
+// Group overlap detection
+// ============================================================================
+
+describe('renderMermaid – group overlap', () => {
+  it('sibling subgroups do not overlap after header expansion', async () => {
+    // Reproduces the sample diagram structure: LR layout with deeply nested
+    // sibling groups (KB, LLM, Classification inside Attachments).
+    // After expandGroupsForHeaders, KB expands upward into Classification's
+    // space, causing a ~32px overlap.
+    const svg = await renderMermaid(`flowchart LR
+      subgraph Ingestion ["Ingestion"]
+        direction LR
+        I1["Manual Upload"]
+
+        subgraph Parsing ["Parsing"]
+          P1["Python stdlib"]
+        end
+
+        subgraph Attachments ["Attachments"]
+          direction TB
+          A1["Text-only"]
+
+          subgraph KB ["Knowledge Base"]
+            K2["OpenSearch"]
+          end
+
+          subgraph LLM ["LLM Selection"]
+            L4["Multi-Model"]
+          end
+
+          subgraph Classification ["Classification"]
+            direction TB
+            C1["LLM Prompt"]
+            C2["LLM + Rules"]
+
+            subgraph Response ["Response"]
+              direction TB
+              R3["Historical RAG"]
+            end
+          end
+        end
+      end
+
+      Ingestion --> Parsing
+      Parsing --> Attachments
+      Parsing --> Classification
+      Attachments --> KB
+      KB --> Response
+      LLM --> Classification
+      LLM --> Response
+      Classification --> Response`)
+
+    // Extract group rects (rx="8")
+    const groupRects = [...svg.matchAll(/rect x="([^"]+)" y="([^"]+)" width="([^"]+)" height="([^"]+)" rx="8"/g)]
+    expect(groupRects.length).toBeGreaterThanOrEqual(5)
+
+    // Parse into bounding boxes
+    const boxes = groupRects.map(m => ({
+      x: parseFloat(m[1]!),
+      y: parseFloat(m[2]!),
+      w: parseFloat(m[3]!),
+      h: parseFloat(m[4]!),
+      right: parseFloat(m[1]!) + parseFloat(m[3]!),
+      bottom: parseFloat(m[2]!) + parseFloat(m[4]!),
+    }))
+
+    // Check all non-parent-child pairs for overlap
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i]!
+        const b = boxes[j]!
+        // Skip parent-child containment
+        const aContainsB = a.x <= b.x && a.y <= b.y && a.right >= b.right && a.bottom >= b.bottom
+        const bContainsA = b.x <= a.x && b.y <= a.y && b.right >= a.right && b.bottom >= a.bottom
+        if (aContainsB || bContainsA) continue
+
+        // Non-contained groups must not overlap
+        const overlapX = a.x < b.right && a.right > b.x
+        const overlapY = a.y < b.bottom && a.bottom > b.y
+        expect(
+          overlapX && overlapY,
+          `Groups ${i} and ${j} overlap: (${a.x.toFixed(1)},${a.y.toFixed(1)})-(${a.right.toFixed(1)},${a.bottom.toFixed(1)}) vs (${b.x.toFixed(1)},${b.y.toFixed(1)})-(${b.right.toFixed(1)},${b.bottom.toFixed(1)})`
+        ).toBe(false)
+      }
+    }
+  })
+})
