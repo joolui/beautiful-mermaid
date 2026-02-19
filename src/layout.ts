@@ -794,6 +794,27 @@ function extractPositionedGraph(
   expandGroupsForHeaders(groups, headerHeight)
   separateSiblingGroups(groups, nodes, edges, graph.subgraphs)
 
+  // After shifting groups/nodes, some edge points may have been partially shifted
+  // (one side of a boundary-crossing edge moved, the other didn't), creating
+  // non-orthogonal segments and short stubs at endpoints. Re-snap to fix.
+  for (const edge of edges) {
+    edge.points = snapToOrthogonal(edge.points, verticalFirst)
+  }
+
+  // After re-snapping, some edges approach their target/source from the wrong
+  // direction. Group separation shifts create stubs near group boundaries that
+  // snapToOrthogonal converts into L-bends. The fixed bend direction can cause
+  // the final segment to oppose the layout flow (e.g., vertical approach in an
+  // LR layout). Fix: flip terminal L-bends so edges approach/exit in the
+  // natural direction for the layout.
+  fixTerminalBendDirections(edges, verticalFirst)
+
+  // Re-clip edge endpoints to updated node boundaries. The original clipping ran
+  // before group header expansion and sibling separation, which shifted nodes and
+  // changed approach directions. Endpoints may now be at center-x/top-y (from a
+  // pre-shift vertical approach) instead of left-x/center-y (correct for LR).
+  reclipEndpointsToNodes(edges, nodes, verticalFirst)
+
   // After expanding groups upward, some may extend above dagre's original margins.
   // Compute the global minimum Y and shift everything down uniformly if needed.
   const flatGroups = flattenAllGroups(groups)
@@ -1152,6 +1173,180 @@ function shiftGroupRects(group: PositionedGroup, dy: number): void {
   for (const child of group.children) {
     shiftGroupRects(child, dy)
   }
+}
+
+/**
+ * Flip terminal L-bends so the final/first edge segment aligns with the layout
+ * flow direction (horizontal for LR/RL, vertical for TD/BT).
+ *
+ * After group separation shifts + re-snap, cross-boundary edges can end up with
+ * a terminal L-bend whose final segment opposes the layout direction. For example,
+ * in an LR layout: ...(xa, ya) → (xb, ya) → (xb, yb) — the last segment is
+ * vertical, making the arrow enter from above/below instead of from the side.
+ *
+ * Fix: swap the L-bend direction so the approach matches the layout flow:
+ *   Before: ...(xa, ya) → (xb, ya) → (xb, yb)  [horiz→vert]
+ *   After:  ...(xa, ya) → (xa, yb) → (xb, yb)  [vert→horiz]
+ */
+function fixTerminalBendDirections(edges: PositionedEdge[], verticalFirst: boolean): void {
+  for (const edge of edges) {
+    const n = edge.points.length
+    if (n < 3) continue
+
+    // --- Fix target approach (last L-bend) ---
+    {
+      const last = edge.points[n - 1]!
+      const prev = edge.points[n - 2]!
+      const prevPrev = edge.points[n - 3]!
+
+      if (!verticalFirst) {
+        // LR/RL: last segment should be horizontal (approach from the side)
+        const isLastVertical = Math.abs(last.x - prev.x) < 2 && Math.abs(last.y - prev.y) >= 2
+        const isPrevHorizontal = Math.abs(prev.y - prevPrev.y) < 2 && Math.abs(prev.x - prevPrev.x) >= 2
+        if (isLastVertical && isPrevHorizontal) {
+          edge.points[n - 2] = { x: prevPrev.x, y: last.y }
+        }
+      } else {
+        // TD/BT: last segment should be vertical (approach from top/bottom)
+        const isLastHorizontal = Math.abs(last.y - prev.y) < 2 && Math.abs(last.x - prev.x) >= 2
+        const isPrevVertical = Math.abs(prev.x - prevPrev.x) < 2 && Math.abs(prev.y - prevPrev.y) >= 2
+        if (isLastHorizontal && isPrevVertical) {
+          edge.points[n - 2] = { x: last.x, y: prevPrev.y }
+        }
+      }
+    }
+
+    // --- Fix source exit (first L-bend) ---
+    {
+      const first = edge.points[0]!
+      const next = edge.points[1]!
+      const nextNext = edge.points[2]!
+
+      if (!verticalFirst) {
+        // LR/RL: first segment should be horizontal (exit from the side)
+        const isFirstVertical = Math.abs(first.x - next.x) < 2 && Math.abs(first.y - next.y) >= 2
+        const isNextHorizontal = Math.abs(next.y - nextNext.y) < 2 && Math.abs(next.x - nextNext.x) >= 2
+        if (isFirstVertical && isNextHorizontal) {
+          edge.points[1] = { x: nextNext.x, y: first.y }
+        }
+      } else {
+        // TD/BT: first segment should be vertical (exit from top/bottom)
+        const isFirstHorizontal = Math.abs(first.y - next.y) < 2 && Math.abs(first.x - next.x) >= 2
+        const isNextVertical = Math.abs(next.x - nextNext.x) < 2 && Math.abs(next.y - nextNext.y) >= 2
+        if (isFirstHorizontal && isNextVertical) {
+          edge.points[1] = { x: first.x, y: nextNext.y }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Re-clip edge endpoints to updated node boundaries after post-processing.
+ *
+ * After group header expansion and sibling separation, nodes have moved but
+ * edge endpoints may still reflect pre-shift clipping (e.g., at center-x/top-y
+ * from an original vertical approach that became horizontal after shifts).
+ *
+ * For each edge, finds the nearest rectangular node to the endpoint and clips
+ * to the correct boundary based on the current approach direction.
+ */
+function reclipEndpointsToNodes(
+  edges: PositionedEdge[],
+  nodes: PositionedNode[],
+  verticalFirst: boolean,
+): void {
+  if (nodes.length === 0) return
+
+  for (const edge of edges) {
+    if (edge.points.length < 2) continue
+
+    // --- Re-clip target endpoint (last point) ---
+    {
+      const lastIdx = edge.points.length - 1
+      const lastPt = edge.points[lastIdx]!
+      const tgt = findClosestRectNode(lastPt, nodes)
+
+      if (tgt) {
+        const tgtCx = tgt.x + tgt.width / 2
+        const tgtCy = tgt.y + tgt.height / 2
+        const prevPt = edge.points[lastIdx - 1]!
+        const dx = Math.abs(lastPt.x - prevPt.x)
+        const dy = Math.abs(lastPt.y - prevPt.y)
+
+        if (dx >= dy) {
+          // Horizontal approach → clip to left/right boundary at center y
+          const fromLeft = prevPt.x < tgtCx
+          edge.points[lastIdx] = {
+            x: fromLeft ? tgt.x : tgt.x + tgt.width,
+            y: tgtCy,
+          }
+          if (lastIdx >= 1) {
+            edge.points[lastIdx - 1] = { ...prevPt, y: tgtCy }
+          }
+        } else {
+          // Vertical approach → clip to top/bottom boundary at center x
+          const fromTop = prevPt.y < tgtCy
+          edge.points[lastIdx] = {
+            x: tgtCx,
+            y: fromTop ? tgt.y : tgt.y + tgt.height,
+          }
+          if (lastIdx >= 1) {
+            edge.points[lastIdx - 1] = { ...prevPt, x: tgtCx }
+          }
+        }
+      }
+    }
+
+    // --- Re-clip source endpoint (first point) ---
+    if (edge.points.length >= 3) {
+      const firstPt = edge.points[0]!
+      const src = findClosestRectNode(firstPt, nodes)
+
+      if (src) {
+        const srcCx = src.x + src.width / 2
+        const srcCy = src.y + src.height / 2
+        const nextPt = edge.points[1]!
+        const dx = Math.abs(firstPt.x - nextPt.x)
+        const dy = Math.abs(firstPt.y - nextPt.y)
+
+        if (dx >= dy) {
+          // Horizontal exit → clip to left/right boundary at center y
+          const exitRight = nextPt.x > srcCx
+          edge.points[0] = {
+            x: exitRight ? src.x + src.width : src.x,
+            y: srcCy,
+          }
+          edge.points[1] = { ...nextPt, y: srcCy }
+        } else {
+          // Vertical exit → clip to top/bottom boundary at center x
+          const exitDown = nextPt.y > srcCy
+          edge.points[0] = {
+            x: srcCx,
+            y: exitDown ? src.y + src.height : src.y,
+          }
+          edge.points[1] = { ...nextPt, x: srcCx }
+        }
+      }
+    }
+  }
+}
+
+/** Find the nearest rectangular node to a point (for endpoint re-clipping). */
+function findClosestRectNode(point: Point, nodes: PositionedNode[]): PositionedNode | undefined {
+  let best: PositionedNode | undefined
+  let bestDist = Infinity
+  for (const n of nodes) {
+    if (NON_RECT_SHAPES.has(n.shape)) continue
+    const cx = n.x + n.width / 2
+    const cy = n.y + n.height / 2
+    const d = Math.hypot(point.x - cx, point.y - cy)
+    if (d < bestDist) {
+      bestDist = d
+      best = n
+    }
+  }
+  return best
 }
 
 /** Flatten a group tree into a flat array of all groups (including nested). */

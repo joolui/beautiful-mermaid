@@ -137,7 +137,24 @@ export function snapToOrthogonal(points: Point[], verticalFirst = true): Point[]
   // (vertical segment) or same y (horizontal segment), the middle point is
   // redundant and creates visual artifacts at polyline corners.
   // Then remove near-zero stub segments at endpoints.
-  return cleanupShortSegments(removeCollinear(result))
+  const cleaned = cleanupShortSegments(removeCollinear(result))
+
+  // Final pass: cleanupShortSegments may create near-orthogonal segments
+  // (e.g., removing a 3px vertical stub leaves a 1.8px y-drift on a long
+  // horizontal span). Snap any remaining sub-2px deviations to strict 0.
+  for (let i = 1; i < cleaned.length; i++) {
+    const prev = cleaned[i - 1]!
+    const curr = cleaned[i]!
+    const dxAbs = Math.abs(curr.x - prev.x)
+    const dyAbs = Math.abs(curr.y - prev.y)
+    if (dxAbs < 2 && dyAbs >= 2) {
+      curr.x = prev.x
+    } else if (dyAbs < 2 && dxAbs >= 2) {
+      curr.y = prev.y
+    }
+  }
+
+  return cleaned
 }
 
 /** Remove middle points from three-in-a-row collinear sequences. */
@@ -162,6 +179,10 @@ function removeCollinear(pts: Point[]): Point[] {
  * Remove segments shorter than minLength by merging into adjacent segments.
  * Eliminates near-zero stubs at edge endpoints (e.g., 3px final segments
  * before arrowheads) that create visual noise.
+ *
+ * Safety: never removes a point if doing so would create a non-orthogonal
+ * (diagonal) segment. This prevents short-stub cleanup from destroying
+ * the orthogonal guarantee established by snapToOrthogonal.
  */
 function cleanupShortSegments(pts: Point[], minLength: number = 5): Point[] {
   if (pts.length < 3) return pts
@@ -174,6 +195,9 @@ function cleanupShortSegments(pts: Point[], minLength: number = 5): Point[] {
     const prev = result[result.length - 2]!
     const segLen = Math.abs(last.x - prev.x) + Math.abs(last.y - prev.y)
     if (segLen < minLength) {
+      // Guard: don't remove if it would create a diagonal segment
+      const ante = result[result.length - 3]!
+      if (Math.abs(last.x - ante.x) >= 2 && Math.abs(last.y - ante.y) >= 2) break
       result.splice(result.length - 2, 1)
     } else {
       break
@@ -186,6 +210,9 @@ function cleanupShortSegments(pts: Point[], minLength: number = 5): Point[] {
     const next = result[1]!
     const segLen = Math.abs(next.x - first.x) + Math.abs(next.y - first.y)
     if (segLen < minLength) {
+      // Guard: don't remove if it would create a diagonal segment
+      const nextNext = result[2]!
+      if (Math.abs(first.x - nextNext.x) >= 2 && Math.abs(first.y - nextNext.y) >= 2) break
       result.splice(1, 1)
     } else {
       break

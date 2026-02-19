@@ -364,19 +364,31 @@ describe('snapToOrthogonal – edge routing artifacts', () => {
     expect(Math.abs(ys[ys.length - 1]! - ys[0]!)).toBeLessThan(0.01)
   })
 
-  it('eliminates near-zero final segments', () => {
+  it('preserves short final segments when removal would create diagonals', () => {
     const points = [
       { x: 100, y: 100 },
       { x: 100, y: 200 },
       { x: 200, y: 200 },
-      { x: 200, y: 203 }, // 3px final segment
+      { x: 200, y: 203 }, // 3px final segment — removing would create diagonal
     ]
     const result = snapToOrthogonal(points, true)
-    // The near-zero segment should be absorbed
-    const lastTwo = result.slice(-2)
-    const finalDy = Math.abs(lastTwo[1]!.y - lastTwo[0]!.y)
-    const finalDx = Math.abs(lastTwo[1]!.x - lastTwo[0]!.x)
-    // Final segment should be meaningful (> 5px) in at least one axis
-    expect(Math.max(finalDx, finalDy)).toBeGreaterThan(5)
+    // The stub must be preserved because removing it would make
+    // (100,200) → (200,203) a diagonal. All segments must be orthogonal.
+    for (let i = 1; i < result.length; i++) {
+      const dx = Math.abs(result[i]!.x - result[i - 1]!.x)
+      const dy = Math.abs(result[i]!.y - result[i - 1]!.y)
+      expect(dx < 2 || dy < 2).toBe(true) // each segment is axis-aligned
+    }
+  })
+
+  it('eliminates near-zero final segments when safe', () => {
+    const points = [
+      { x: 100, y: 100 },
+      { x: 100, y: 200 },
+      { x: 100, y: 203 }, // 3px stub, same x as previous — removal keeps vertical
+    ]
+    const result = snapToOrthogonal(points, true)
+    // Collinear stub at same x can be safely merged into the vertical segment
+    expect(result.length).toBeLessThan(points.length)
   })
 })
