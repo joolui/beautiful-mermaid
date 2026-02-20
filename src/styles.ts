@@ -69,7 +69,7 @@ export const NODE_PADDING = {
 export const STROKE_WIDTHS = {
   outerBox: 1,
   innerBox: 1,
-  connector: 0.75,
+  connector: 1.2,
 } as const
 
 /** Corner radius for group (subgraph) rectangles */

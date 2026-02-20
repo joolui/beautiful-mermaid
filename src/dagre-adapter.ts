@@ -158,7 +158,7 @@ export function snapToOrthogonal(points: Point[], verticalFirst = true): Point[]
 }
 
 /** Remove middle points from three-in-a-row collinear sequences. */
-function removeCollinear(pts: Point[]): Point[] {
+export function removeCollinear(pts: Point[]): Point[] {
   if (pts.length < 3) return pts
   const out: Point[] = [pts[0]!]
   for (let i = 1; i < pts.length - 1; i++) {

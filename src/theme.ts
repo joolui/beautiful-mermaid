@@ -70,8 +70,8 @@ export const MIX = {
   textMuted:    40,
   /** Faint text (de-emphasized): fg mixed at 25% */
   textFaint:    25,
-  /** Edge/connector lines: fg mixed at 30% */
-  line:         30,
+  /** Edge/connector lines: fg mixed at 45% */
+  line:         45,
   /** Arrow head fill: fg mixed at 50% */
   arrow:        50,
   /** Node fill tint: fg mixed at 3% */

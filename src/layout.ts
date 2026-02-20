@@ -3,7 +3,7 @@
 import dagre from '@dagrejs/dagre/dist/dagre.js'
 import type { MermaidGraph, MermaidSubgraph, PositionedGraph, PositionedNode, PositionedEdge, PositionedGroup, Point, RenderOptions } from './types.ts'
 import { estimateTextWidth, FONT_SIZES, FONT_WEIGHTS, NODE_PADDING, GROUP_HEADER_CONTENT_PAD, LINE_HEIGHT_RATIO, wrapText } from './styles.ts'
-import { centerToTopLeft, snapToOrthogonal, clipToDiamondBoundary, clipToCircleBoundary, clipEndpointsToNodes } from './dagre-adapter.ts'
+import { centerToTopLeft, snapToOrthogonal, removeCollinear, clipToDiamondBoundary, clipToCircleBoundary, clipEndpointsToNodes } from './dagre-adapter.ts'
 
 /** Shapes that render as circles — need edge endpoint clipping to the circle boundary */
 const CIRCULAR_SHAPES = new Set(['circle', 'doublecircle', 'state-start', 'state-end'])
@@ -820,6 +820,23 @@ function extractPositionedGraph(
   // pre-shift vertical approach) instead of left-x/center-y (correct for LR).
   reclipEndpointsToNodes(edges, nodes, verticalFirst)
 
+  // fixTerminalBendDirections and reclipEndpointsToNodes can introduce collinear
+  // points (e.g., flipping a terminal L-bend creates three consecutive points on the
+  // same axis, with the middle one causing a U-turn detour). Clean up collinear
+  // points and fix stale label positions that drifted far from the edge path.
+  for (const edge of edges) {
+    edge.points = removeCollinear(edge.points)
+    if (edge.label && edge.labelPosition && edge.points.length >= 2) {
+      // After post-layout shifts, dagre's original label position may no longer be
+      // near the actual edge path. Recalculate only when the label drifted far away
+      // (>30px) — preserving dagre's collision-avoidance placement otherwise.
+      const distToEdge = distanceToPolyline(edge.labelPosition, edge.points)
+      if (distToEdge > 30) {
+        edge.labelPosition = edgeMidpoint(edge.points)
+      }
+    }
+  }
+
   // After expanding groups upward, some may extend above dagre's original margins.
   // Compute the global minimum Y and shift everything down uniformly if needed.
   const flatGroups = flattenAllGroups(groups)
@@ -1407,4 +1424,60 @@ function collectAllSubgraphIds(sg: MermaidSubgraph, out: Set<string>): void {
   for (const child of sg.children) {
     collectAllSubgraphIds(child, out)
   }
+}
+
+/**
+ * Compute the minimum distance from a point to any segment of a polyline.
+ * Used to detect when a label has drifted far from its edge path after
+ * post-layout adjustments (group expansion, sibling separation, etc.).
+ */
+function distanceToPolyline(point: Point, polyline: Point[]): number {
+  let minDist = Infinity
+  for (let i = 1; i < polyline.length; i++) {
+    const a = polyline[i - 1]!
+    const b = polyline[i]!
+    const dx = b.x - a.x
+    const dy = b.y - a.y
+    const lenSq = dx * dx + dy * dy
+    if (lenSq === 0) continue
+    const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq))
+    const projX = a.x + t * dx
+    const projY = a.y + t * dy
+    const dist = Math.sqrt((point.x - projX) ** 2 + (point.y - projY) ** 2)
+    minDist = Math.min(minDist, dist)
+  }
+  return minDist
+}
+
+/**
+ * Compute the geometric midpoint of a polyline by walking segments.
+ * Used to recalculate edge label positions after post-layout modifications
+ * invalidate dagre's original label placements.
+ */
+function edgeMidpoint(points: Point[]): Point {
+  if (points.length <= 1) return points[0] ?? { x: 0, y: 0 }
+
+  let totalLength = 0
+  for (let i = 1; i < points.length; i++) {
+    const dx = points[i]!.x - points[i - 1]!.x
+    const dy = points[i]!.y - points[i - 1]!.y
+    totalLength += Math.sqrt(dx * dx + dy * dy)
+  }
+
+  let remaining = totalLength / 2
+  for (let i = 1; i < points.length; i++) {
+    const dx = points[i]!.x - points[i - 1]!.x
+    const dy = points[i]!.y - points[i - 1]!.y
+    const segLen = Math.sqrt(dx * dx + dy * dy)
+    if (remaining <= segLen) {
+      const t = segLen > 0 ? remaining / segLen : 0
+      return {
+        x: points[i - 1]!.x + t * dx,
+        y: points[i - 1]!.y + t * dy,
+      }
+    }
+    remaining -= segLen
+  }
+
+  return points[points.length - 1]!
 }
