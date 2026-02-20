@@ -823,9 +823,41 @@ function extractPositionedGraph(
   // fixTerminalBendDirections and reclipEndpointsToNodes can introduce collinear
   // points (e.g., flipping a terminal L-bend creates three consecutive points on the
   // same axis, with the middle one causing a U-turn detour). Clean up collinear
-  // points and fix stale label positions that drifted far from the edge path.
+  // points, nudge segments off group borders, and fix stale label positions.
+  const flatGroups = flattenAllGroups(groups)
+  const BORDER_NUDGE = 6
+
   for (const edge of edges) {
     edge.points = removeCollinear(edge.points)
+
+    // After post-layout shifts (header expansion, sibling separation), edge segments
+    // can land exactly on a group border, making them invisible behind the border
+    // stroke. Nudge such segments a few pixels outside the group.
+    for (let i = 0; i < edge.points.length - 1; i++) {
+      const p1 = edge.points[i]!
+      const p2 = edge.points[i + 1]!
+      // Horizontal segment check
+      if (Math.abs(p1.y - p2.y) < 1) {
+        const segMinX = Math.min(p1.x, p2.x)
+        const segMaxX = Math.max(p1.x, p2.x)
+        for (const gb of flatGroups) {
+          // Skip if segment doesn't overlap the group horizontally
+          if (segMaxX < gb.x || segMinX > gb.x + gb.width) continue
+          const groupBottom = gb.y + gb.height
+          if (Math.abs(p1.y - groupBottom) < 2) {
+            p1.y = groupBottom + BORDER_NUDGE
+            p2.y = groupBottom + BORDER_NUDGE
+            break
+          }
+          if (Math.abs(p1.y - gb.y) < 2) {
+            p1.y = gb.y - BORDER_NUDGE
+            p2.y = gb.y - BORDER_NUDGE
+            break
+          }
+        }
+      }
+    }
+
     if (edge.label && edge.labelPosition && edge.points.length >= 2) {
       // After post-layout shifts, dagre's original label position may no longer be
       // near the actual edge path. Recalculate only when the label drifted far away
@@ -839,7 +871,6 @@ function extractPositionedGraph(
 
   // After expanding groups upward, some may extend above dagre's original margins.
   // Compute the global minimum Y and shift everything down uniformly if needed.
-  const flatGroups = flattenAllGroups(groups)
   const allYs = [
     ...nodes.map(n => n.y),
     ...flatGroups.map(g => g.y),

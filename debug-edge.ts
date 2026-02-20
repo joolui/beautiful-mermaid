@@ -44,14 +44,20 @@ for (const edge of positioned.edges) {
   }
 }
 
-// Also dump all labeled dashed edges for context
-console.log('\n=== All labeled dashed edges ===')
-for (const edge of positioned.edges) {
-  if (edge.label && edge.style === 'dotted') {
-    console.log(`${edge.source} -> ${edge.target} (${edge.label}):`)
-    console.log(`  Points: [${edge.points.map(p => `(${p.x.toFixed(1)},${p.y.toFixed(1)})`).join(' → ')}]`)
-    if (edge.labelPosition) {
-      console.log(`  Label: (${edge.labelPosition.x.toFixed(1)}, ${edge.labelPosition.y.toFixed(1)})`)
-    }
+// Dump groups to find Security Groups box bounds
+function dumpGroups(groups: any[], indent = '') {
+  for (const g of groups) {
+    const bottom = g.y + g.height
+    console.log(`${indent}${g.id} "${g.label}": y=${g.y.toFixed(1)} h=${g.height.toFixed(1)} bottom=${bottom.toFixed(1)} x=${g.x.toFixed(1)} w=${g.width.toFixed(1)} right=${(g.x + g.width).toFixed(1)}`)
+    if (g.children?.length) dumpGroups(g.children, indent + '  ')
+  }
+}
+console.log('\n=== All groups ===')
+dumpGroups(positioned.groups)
+
+// Dump SG_L node position
+for (const node of positioned.nodes) {
+  if (node.id === 'SG_L' || node.id === 'ENI_A') {
+    console.log(`\nNode ${node.id}: x=${node.x.toFixed(1)} y=${node.y.toFixed(1)} w=${node.width.toFixed(1)} h=${node.height.toFixed(1)} bottom=${(node.y + node.height).toFixed(1)}`)
   }
 }
